@@ -56,6 +56,14 @@ class ModernPPTXApp:
         self.sample_count = tk.IntVar(value=48)  # 默认采样数
         self.sample_entry.config(textvariable=self.sample_count)
 
+        
+        self.left_count = tk.IntVar(value=5)  # 默认采样数
+        self.interval_left_entry.config(textvariable=self.left_count)
+        
+        self.right_count = tk.IntVar(value=44)  # 默认采样数
+        self.interval_right_entry.config(textvariable=self.right_count)
+
+
     def configure_styles(self):
         """配置现代UI样式"""
         self.style.theme_use('clam')
@@ -88,19 +96,39 @@ class ModernPPTXApp:
         
 
         # 文件路径显示
-        path_frame = ttk.Frame(main_frame)
-        path_frame.pack(fill=tk.X, pady=5)
+        para_frame = ttk.Frame(main_frame)
+        para_frame.pack(fill=tk.X, pady=5)
 
         # how many values sampled
-        ttk.Label(path_frame, text="数据采样数:", width=10).pack(side=tk.LEFT, padx=(0,5))
-        self.sample_entry = ttk.Entry(path_frame, width=10)
+        ttk.Label(para_frame, text="数据采样数:", width=10).pack(side=tk.LEFT, padx=(0,5))
+        self.sample_entry = ttk.Entry(para_frame, width=10)
         self.sample_entry.pack(side=tk.LEFT)
-        ttk.Label(path_frame, text="  ").pack(side=tk.LEFT)  # 添加间距
+        ttk.Label(para_frame, text="  ").pack(side=tk.LEFT)  # 添加间距
          # 在self.sample_entry.pack之后添加验证
         self.sample_entry.config(
             validate="key",
             validatecommand=(self.root.register(self.validate_number), '%P')
         )
+        # standard sample time interval parameter
+        ttk.Label(para_frame, text="标准采样间隔时间:", width=15).pack(side=tk.LEFT, padx=(0,5))
+        self.interval_left_entry = ttk.Entry(para_frame, width=5)
+        self.interval_left_entry.pack(side=tk.LEFT)
+        
+        ttk.Label(para_frame, text=" 到 ").pack(side=tk.LEFT)  # 添加间距 
+        self.interval_right_entry = ttk.Entry(para_frame, width=5)
+        self.interval_right_entry.pack(side=tk.LEFT)
+        self.interval_left_entry.config(
+            validate="key",
+            validatecommand=(self.root.register(self.validate_number), '%P')
+        )
+        self.interval_right_entry.config(
+            validate="key",
+            validatecommand=(self.root.register(self.validate_number), '%P')
+        )
+
+ # 文件路径显示
+        path_frame = ttk.Frame(main_frame)
+        path_frame.pack(fill=tk.X, pady=5)
 
         ttk.Label(path_frame, text="当前文件:").pack(side=tk.LEFT)
         self.path_label = ttk.Label(path_frame, textvariable=self.pptx_path, 
@@ -259,38 +287,85 @@ class ModernPPTXApp:
         def task():
             try:
                 # ... (保持原有处理逻辑不变)
-                file_list = ['KineticStandard.xlsx','SteadyStandard.xlsx' ]
+                #file_list = ['KineticStandard.xlsx','SteadyStandard.xlsx' ]
                 #file_list = ['20250307-Kinetic Standard Curve-Middle Conc.xlsx', '377-Standard Curve.xlsx']
 
                 #pptx_file = '20220809-curveoutput-XHB-CPD1-1280-only multiple curve.pptx'
                 #pptx_file = 'chart.pptx'
                 data_frame,df_original=self.extract_chart_data(self.pptx_path.get())
 
-                for file in file_list:
-                    data = self.read_column_to_list(file,column_name='Y-axis')
-                    data_trim = self.retain_numbers_uniform(data,int(self.sample_count.get()))
-                    #print(len(data_trim))
-                    #print(data_trim)
+                #for file in file_list:
+                #get steady stadard data list
+                Steady_data = self.read_column_to_list('SteadyStandard.xlsx',column_name='Y-axis')
+                Steady_data_trim = self.retain_numbers_uniform(Steady_data,int(self.sample_count.get()))
 
-                    data_frame[file.split()[0]]= data_trim
+                #   get multi kinetic standard data
 
-                data_frame.to_csv('chart_data.csv', index=False)
-                
+                def get_multi_kinetic_standard_data():
+                    df = pd.read_excel("Multiple Kinetic Standard Curve.xlsx") 
+                    data_columns = [ c for i, c in enumerate(df.columns) if i%2!=0 ]
+
+                    x_axis = df["X-axis"].to_list()
+                    x_axis = [float(i) for i in x_axis] 
+
+                    def find_index(lst, value, default=-1):
+                        try:
+                            return lst.index(value)
+                        except ValueError:
+                            return default
+                    left = find_index(x_axis,float(self.left_count.get()))
+                    right = find_index(x_axis,float(self.right_count.get()))
+
+                    kinetic_data_list = []
+                    for c in data_columns:
+                        data = [v for i, v in enumerate(df[c].to_list()) if i<=right and i >= left]                        
+                        data_trim = self.retain_numbers_uniform(data,int(self.sample_count.get()))
+                        kinetic_data_list.append(data_trim)
+                    return kinetic_data_list
+                multi_kinetic_data = get_multi_kinetic_standard_data()
+
+                # get nearest standard data
+                def get_nearest_kinetic_standard_data(value):
+                    max_list = [i[-1] for i in multi_kinetic_data]
+
+                    def find_nearest_index(lst, target):
+                    # 找到列表中与目标值最接近的数的索引
+                        return min(range(len(lst)), key=lambda i: abs(lst[i] - target))
+                    index = find_nearest_index(max_list,value)
+                    #print(f"match Y{index+1}")
+                    return multi_kinetic_data[index],index
+
+
+                data_frame.to_csv('chart_data.csv', index=False)                
                 df_original.to_csv('chart_original_data.csv', index=False)
                 
                 data_dict = {} 
-                columns_data = data_frame.columns[:-2]
+                columns_data = data_frame.columns
+
+                #df_processing = pd.DataFrame()
 
                 for no in columns_data:
+                    #print(f"processing chart_{no}")
                     data_list =  [float(x) for x in data_frame[no].tolist()]
-                    Kinetic_list = [float(x) for x in data_frame[data_frame.columns[-2]].tolist()]
-                    Steady_list =  [float(x) for x in data_frame[data_frame.columns[-1]].tolist()]
+                    #df_processing[f"Chart{no}"]=data_list
+                    #print(data_list)
+                    Kinetic_list,index = get_nearest_kinetic_standard_data(data_list[-1])
+                    #df_processing[f"Y{index}"]=Kinetic_list
+                    #print("Kinetic_list")
+                    #print(Kinetic_list)
+
+                    Steady_list =  [float(x) for x in Steady_data_trim]
+                    #print("Steady_list")
+                    #print(Steady_list)
+                    #df_processing["Steady_list"]=Steady_list
                     Kinetic_distance=round(data_list[-1]-Kinetic_list[-1],2)
                     Kinetic_MSE =round(self.calculate_mse(Kinetic_list,data_list,Kinetic_distance),2)
                     Steady_distance=round(data_list[-1]-Steady_list[-1],2)
                     Steady_MSE=round(self.calculate_mse(Steady_list,data_list,Steady_distance),2) 
                     #data_dict[no]={'Kinetic_distance':Kinetic_distance,'Kinetic_score':Kinetic_MSE,'Steady_distance':Steady_distance,'Steady_score':Steady_MSE}
                     data_dict[no]={'binding_max':data_list[-1],'Kinetic_score':Kinetic_MSE,'Steady_score':Steady_MSE}
+                #df_processing.to_csv("chart_processed.csv",index=False)
+
                 df_result = pd.DataFrame.from_dict(data_dict, orient="index")
                 print(df_result)
                 df_result.to_csv('chart_result.csv', index=True)
